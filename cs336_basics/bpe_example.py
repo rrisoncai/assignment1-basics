@@ -1,14 +1,30 @@
 # BPE example
 
-text = "low low low low low lower lower widest widest widest newest newest newest newest newest newest"
+text = "low low low low low <|endoftext|> lower lower widest widest widest newest newest newest newest newest newest"
 
 # Init vocab
+import regex as re
 
-# split on spaces
-words = text.split()
+special_tokens=["<|endoftext|>"]
+pattern = "|".join(map(re.escape, special_tokens))
+
+# Split corpus into chunks separated by special tokens
+chunks = re.split(pattern, text)
+
+# Filter out any empty strings and whitespace-only chunks
+chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
+
+print("Chunks after removing special tokens:")
+print(chunks)
+
+PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+
 word_count = {}
-for w in words:
-    word_count[w] = word_count.get(w, 0) + 1
+for chunk in chunks:
+    matches = re.finditer(PAT, chunk)
+    for m in matches:
+        w = m.group()
+        word_count[w] = word_count.get(w, 0) + 1
 
 print(word_count)
 
@@ -53,3 +69,5 @@ for i in range(6):
     byte_tuple_count = merged_tuple_count
     print("After Merge:")
     print(byte_tuple_count)
+
+print("Fianl output:")
