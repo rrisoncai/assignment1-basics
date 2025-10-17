@@ -1,11 +1,49 @@
 import logging
 import os
 from typing import BinaryIO
+from concurrent.futures import ProcessPoolExecutor
+from collections import Counter
+import regex as re
 
 logging.basicConfig(
     level=logging.DEBUG,
     format='[%(levelname)s] %(message)s',
-    force=True)
+    force=False)
+
+PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+TOKEN_RE = re.compile(PAT)
+
+def pre_tokenization_impl(
+        text: str,
+        special_tokens: list[str]
+) -> dict[tuple[bytes, ...], int]:
+    if special_tokens:
+        pattern = "|".join(map(re.escape, special_tokens))
+        chunks = re.split(pattern, text)
+    else:
+        chunks = [text]
+
+    word_count: dict[str, int] = {}
+    for chunk in chunks:
+        for m in TOKEN_RE.finditer(chunk):
+            w = m.group()
+            word_count[w] = word_count.get(w, 0) + 1
+
+    byte_tuple_count: dict[tuple[bytes, ...], int] = {}
+    for word, count in word_count.items():
+        b = word.encode("utf-8")
+        tup = tuple(bytes([bt]) for bt in b)
+        byte_tuple_count[tup] = byte_tuple_count.get(tup, 0) + count
+    return byte_tuple_count
+
+def _count_chunk_worker(
+    args: tuple[str, int, int, list[str]]
+) -> dict[tuple[bytes, ...], int]:
+    input_path, start, end, special_tokens = args
+    with open(input_path, "rb") as f:
+        f.seek(start)
+        chunk = f.read(end - start).decode("utf-8", errors="ignore")
+        return pre_tokenization_impl(chunk, special_tokens)
 
 def find_chunk_boundaries(
     file: BinaryIO,
@@ -80,18 +118,16 @@ class BPETokenizer:
             num_processes = 4
             boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
 
-            # The following is a serial implementation, but you can parallelize this
-            # by sending each start/end pair to a set of processes.
+            tasks = [
+                (self.input_path, start, end, self.special_tokens)
+                for start, end, in zip(boundaries[:-1], boundaries[1:])
+            ]
             global_counts: dict[tuple[bytes, ...], int] = {}
-            for start, end in zip(boundaries[:-1], boundaries[1:]):
-                f.seek(start)
-                chunk = f.read(end - start).decode("utf-8", errors="ignore")
-                # Run pre-tokenization on your chunk and store the counts for each pre-token
-                byte_tuple_count = self.pre_tokenization(chunk)
+            with ProcessPoolExecutor(max_workers=num_processes) as ex:
+                for local_counts in ex.map(_count_chunk_worker, tasks):
+                    for k, v in local_counts.items():
+                        global_counts[k] = global_counts.get(k, 0) + v
 
-                for k, v in byte_tuple_count.items():
-                    global_counts[k] = global_counts.get(k, 0) + v
-            
             return self.merge(global_counts)
     
     def pre_tokenization(
@@ -109,33 +145,7 @@ class BPETokenizer:
         Returns:
             dict[tuple[bytes, ...], int]: A freq map of byte level tokens
         """
-        # Init vocab
-        import regex as re
-
-        if self.special_tokens:
-            pattern = "|".join(map(re.escape, self.special_tokens))
-            chunks = re.split(pattern, text)
-        else:
-            chunks = [text]
-
-        # FIX: no stripe(). stripe() will remove '\n\n'.
-
-        PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-
-        word_count = {}
-        for chunk in chunks:
-            matches = re.finditer(PAT, chunk)
-            for m in matches:
-                w = m.group()
-                word_count[w] = word_count.get(w, 0) + 1
-        # FIX: implement real single-byte tokens
-        byte_tuple_count: dict[tuple[bytes, ...], int] = {}
-        for word, count in word_count.items():
-            b = word.encode("utf-8")
-            # Represent the word as a tuple of single-byte tokens (each token is bytes length 1)
-            tup = tuple(bytes([bt]) for bt in b)
-            byte_tuple_count[tup] = byte_tuple_count.get(tup, 0) + count
-        return byte_tuple_count
+        return pre_tokenization_impl(text, self.special_tokens)
     
     def merge(
             self,
@@ -176,11 +186,6 @@ class BPETokenizer:
         return self.vocab, self.merges
 
 # TEST CODE
-text = "low low low low low <|endoftext|> lower lower widest widest widest newest newest newest newest newest newest"
-
-bpe = BPETokenizer(input_path="", vocab_size=260, special_tokens=["<|endoftext|>"])
-btc = bpe.pre_tokenization(text)
-print(len(bpe.vocab))
-vocab, merges = bpe.merge(btc)
-print(vocab)
-print(merges)
+if __name__ == "__main__":
+    bpe = BPETokenizer(input_path="../../data/TinyStoriesV2-GPT4-valid.txt", vocab_size=1000, special_tokens=["<|endoftext|>"])
+    bpe.train()
