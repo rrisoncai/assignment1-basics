@@ -112,13 +112,13 @@ class BPETokenizer:
         # Init vocab
         import regex as re
 
-        pattern = "|".join(map(re.escape, self.special_tokens))
+        if self.special_tokens:
+            pattern = "|".join(map(re.escape, self.special_tokens))
+            chunks = re.split(pattern, text)
+        else:
+            chunks = [text]
 
-        # Split corpus into chunks separated by special tokens
-        chunks = re.split(pattern, text)
-
-        # Filter out any empty strings and whitespace-only chunks
-        chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
+        # FIX: no stripe(). stripe() will remove '\n\n'.
 
         PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
@@ -128,10 +128,13 @@ class BPETokenizer:
             for m in matches:
                 w = m.group()
                 word_count[w] = word_count.get(w, 0) + 1
-
-        byte_tuple_count = {
-            tuple(ch.encode("utf-8") for ch in word): count for word, count in word_count.items()
-        }
+        # FIX: implement real single-byte tokens
+        byte_tuple_count: dict[tuple[bytes, ...], int] = {}
+        for word, count in word_count.items():
+            b = word.encode("utf-8")
+            # Represent the word as a tuple of single-byte tokens (each token is bytes length 1)
+            tup = tuple(bytes([bt]) for bt in b)
+            byte_tuple_count[tup] = byte_tuple_count.get(tup, 0) + count
         return byte_tuple_count
     
     def merge(
@@ -148,7 +151,6 @@ class BPETokenizer:
                     byte_pair_count[p] = byte_pair_count.get(p, 0) + count
 
             largest_pair_count = max(byte_pair_count.items(), key=lambda x:(x[1],x[0]))
-            # print("pair to merge:", largest_pair_count[0])
 
             first, second = largest_pair_count[0]
             merged_byte = b"".join((first, second))
@@ -173,6 +175,7 @@ class BPETokenizer:
         
         return self.vocab, self.merges
 
+# TEST CODE
 text = "low low low low low <|endoftext|> lower lower widest widest widest newest newest newest newest newest newest"
 
 bpe = BPETokenizer(input_path="", vocab_size=260, special_tokens=["<|endoftext|>"])
