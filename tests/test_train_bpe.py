@@ -21,6 +21,7 @@ def test_train_bpe_speed():
         special_tokens=["<|endoftext|>"],
     )
     end_time = time.time()
+    print(f"Train BPE Time: {end_time - start_time:.2f} seconds")
     assert end_time - start_time < 1.5
 
 
