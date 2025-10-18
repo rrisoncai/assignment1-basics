@@ -131,23 +131,6 @@ class BPETrainer:
 
             return self.merge(global_counts)
     
-    def pre_tokenization(
-            self,
-            text: str
-    ) -> dict[tuple[bytes, ...], int]:
-        """
-        Perform pre-tokenization on a text chunk:
-        - Remove special tokens
-        - Count occurrence of each byte tuple
-
-        Args:
-            text (str): Text segment
-
-        Returns:
-            dict[tuple[bytes, ...], int]: A freq map of byte level tokens
-        """
-        return pre_tokenization_impl(text, self.special_tokens)
-    
     def merge(
             self,
             byte_count: dict[tuple[bytes, ...], int]
