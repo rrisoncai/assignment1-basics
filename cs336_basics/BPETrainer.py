@@ -135,20 +135,21 @@ class BPETrainer:
             self,
             byte_count: dict[tuple[bytes, ...], int]
     ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
+        bp_count = {}
+        for tup, count in byte_count.items():
+            pairs = [(tup[i], tup[i+1]) for i in range(len(tup)-1)]
+
+            for p in pairs:
+                bp_count[p] = bp_count.get(p, 0) + count
+
         # Merge
         while self.next_id < self.vocab_size:
-            byte_pair_count = {}
-            for tup, count in byte_count.items():
-                pairs = [(tup[i], tup[i+1]) for i in range(len(tup)-1)]
 
-                for p in pairs:
-                    byte_pair_count[p] = byte_pair_count.get(p, 0) + count
+            most_common_pair, most_common_count = max(bp_count.items(), key=lambda x:(x[1],x[0]))
 
-            largest_pair_count = max(byte_pair_count.items(), key=lambda x:(x[1],x[0]))
-
-            first, second = largest_pair_count[0]
-            merged_byte = b"".join((first, second))
-            self.merges.append((first, second))
+            first, second = most_common_pair
+            merged_byte = first + second
+            self.merges.append(most_common_pair)
             self.vocab[self.next_id] = merged_byte
             self.next_id += 1
 
@@ -165,6 +166,18 @@ class BPETrainer:
                         i += 1
                 new_tuple = tuple(new_tuple)
                 merged_tuple_count[new_tuple] = merged_tuple_count.get(new_tuple, 0) + count
+                if new_tuple != tup:
+                    new_pairs = [(new_tuple[i], new_tuple[i+1]) for i in range(len(new_tuple)-1)]
+                    for p in new_pairs:
+                        bp_count[p] = bp_count.get(p, 0) + count
+                    
+                    old_pairs = [(tup[i], tup[i+1]) for i in range(len(tup)-1)]
+                    for p in old_pairs:
+                        bp_count[p] = bp_count.get(p, 0) - count
+                        if (bp_count[p] <= 0):
+                            bp_count.pop(p, None)
+
+
             byte_count = merged_tuple_count
         
         return self.vocab, self.merges
