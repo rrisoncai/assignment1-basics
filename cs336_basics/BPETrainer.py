@@ -5,6 +5,7 @@ from typing import BinaryIO
 from concurrent.futures import ProcessPoolExecutor
 from collections import Counter
 import regex as re
+import time
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -135,6 +136,10 @@ class BPETrainer:
             self,
             byte_count: dict[tuple[bytes, ...], int]
     ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
+        start_next_id = self.next_id
+        _t0 = time.time()
+        _t_last = _t0
+
         bp_count = {}
         for tup, count in byte_count.items():
             pairs = [(tup[i], tup[i+1]) for i in range(len(tup)-1)]
@@ -152,6 +157,14 @@ class BPETrainer:
             self.merges.append(most_common_pair)
             self.vocab[self.next_id] = merged_byte
             self.next_id += 1
+
+            _added = self.next_id - start_next_id
+            if _added % 100 == 0:
+                _now = time.time()
+                logging.info(
+                    f"added {_added} new tokens in {_now - _t_last:.2f}s (total {_now - _t0:.2f}s); nex_id={self.next_id}"
+                )
+                _t_last = _now
 
             merged_tuple_count = {}
             for tup, count in byte_count.items():
@@ -179,6 +192,11 @@ class BPETrainer:
 
 
             byte_count = merged_tuple_count
+        
+        _now_total = time.time()
+        logging.info(
+            f"merge complete: added {self.next_id - start_next_id} new tokens in {_now_total - _t0:.2f}s"
+        )
         
         return self.vocab, self.merges
     def save_artifacts(
