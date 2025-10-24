@@ -97,7 +97,7 @@ class BPETrainer:
     def __init__(self, input_path, vocab_size, special_tokens):
         self.input_path = input_path
         self.vocab_size = vocab_size
-        self.special_tokens = special_tokens
+        self.special_tokens = special_tokens or []
         self.vocab = {}
         self.merges = []
         self.next_id = 0
@@ -246,8 +246,9 @@ class BPETrainer:
 
 # TEST CODE
 if __name__ == "__main__":
-    input_path = "../../data/TinyStoriesV2-GPT4-valid.txt"
-    bpe = BPETrainer(input_path=input_path, vocab_size=1000, special_tokens=["<|endoftext|>"])
+    input_path = "../../data/owt_train.txt"
+    # bpe = BPETrainer(input_path=input_path, vocab_size=10000, special_tokens=["<|endoftext|>"])
+    bpe = BPETrainer(input_path=input_path, vocab_size=32000, special_tokens=[])
     vocab, merges = bpe.train()
     base_name = os.path.splitext(os.path.basename(bpe.input_path))[0]
     out_dir = os.path.join(os.path.dirname(bpe.input_path), f"bpe_artifacts_{base_name}")
