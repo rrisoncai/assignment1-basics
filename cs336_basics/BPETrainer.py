@@ -246,9 +246,8 @@ class BPETrainer:
 
 # TEST CODE
 if __name__ == "__main__":
-    input_path = "../../data/owt_train.txt"
-    # bpe = BPETrainer(input_path=input_path, vocab_size=10000, special_tokens=["<|endoftext|>"])
-    bpe = BPETrainer(input_path=input_path, vocab_size=32000, special_tokens=[])
+    # bpe = BPETrainer(input_path="../../data/TinyStoriesV2-GPT4-valid", vocab_size=10000, special_tokens=["<|endoftext|>"])
+    bpe = BPETrainer(input_path="../../data/owt_train.txt", vocab_size=32000, special_tokens=None)
     vocab, merges = bpe.train()
     base_name = os.path.splitext(os.path.basename(bpe.input_path))[0]
     out_dir = os.path.join(os.path.dirname(bpe.input_path), f"bpe_artifacts_{base_name}")
