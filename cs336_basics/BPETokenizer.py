@@ -132,3 +132,20 @@ class BPETokenizer:
         byte_seq = b"".join(self.vocab[i] for i in ids if i in self.vocab)
 
         return byte_seq.decode("utf-8", errors="replace")
+    
+if __name__ == "__main__":
+    text = """
+    The days are bright and filled with pain.
+    Enclose me in your gentle rain.
+    The time you ran was too insane.
+    We'll meet again, We'll meet again.
+    """
+    bpe = BPETokenizer.from_files(
+        vocab_filepath="../../data/bpe_artifacts_TinyStoriesV2-GPT4-train/vocab.hex.json",
+        merges_filepath="../../data/bpe_artifacts_TinyStoriesV2-GPT4-train/merges.hex.json",
+        special_tokens=["<|endoftext|>"]
+        )
+    token_list = bpe.encode(text)
+    print("text length:", len(text))
+    print("token lenght:", len(token_list))
+    print(f"compression ratio: {len(text) / len(token_list):.2f}")
