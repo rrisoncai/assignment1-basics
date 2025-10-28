@@ -28,8 +28,11 @@ def run_linear(
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
-
-    raise NotImplementedError
+    from cs336_basics.Linear import Linear
+    layer = Linear(d_in, d_out)
+    layer.load_state_dict({"W": weights})
+    return layer(in_features)
+    # raise NotImplementedError
 
 
 def run_embedding(
@@ -50,8 +53,11 @@ def run_embedding(
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-
-    raise NotImplementedError
+    from cs336_basics.Embedding import Embedding
+    layer = Embedding(vocab_size, d_model)
+    layer.load_state_dict({"W": weights})
+    return layer(token_ids)
+    # raise NotImplementedError
 
 
 def run_swiglu(
@@ -83,7 +89,16 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    # raise NotImplementedError
+    from cs336_basics.swiglu import swiglu
+    layer = swiglu(d_model, d_ff)
+    state = {
+        "w1": w1_weight,
+        "w2": w2_weight,
+        "w3": w3_weight
+    }
+    layer.load_state_dict(state)
+    return layer(in_features)
 
 
 def run_scaled_dot_product_attention(
@@ -300,7 +315,7 @@ def run_transformer_lm(
         num_heads (int): Number of heads to use in multi-headed attention. `d_model` must be
             evenly divisible by `num_heads`.
         d_ff (int): Dimensionality of the feed-forward inner layer (section 3.3).
-        rope_theta (float): The RoPE $\Theta$ parameter.
+        rope_theta (float): The RoPE $\\Theta$ parameter.
         weights (dict[str, Tensor]):
             State dict of our reference implementation. {num_layers} refers to an
             integer between `0` and `num_layers - 1` (the layer index).
@@ -378,7 +393,11 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
+    # raise NotImplementedError
+    from cs336_basics.rmsnorm import rmsnorm
+    layer = rmsnorm(d_model, eps)
+    layer.load_state_dict({"weight": weights})
+    return layer(in_features)
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
