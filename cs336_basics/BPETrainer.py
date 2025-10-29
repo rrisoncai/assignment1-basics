@@ -129,7 +129,11 @@ class BPETrainer:
                 for local_counts in ex.map(_count_chunk_worker, tasks):
                     for k, v in local_counts.items():
                         global_counts[k] = global_counts.get(k, 0) + v
-
+            # my PC encounters OOM error, dump byte count to file
+            # import pickle
+            # with open("global_counts.pkl", "wb") as f:
+            #     pickle.dump(global_counts, f)
+            #     print("saved global counts")
             return self.merge(global_counts)
     
     def merge(
