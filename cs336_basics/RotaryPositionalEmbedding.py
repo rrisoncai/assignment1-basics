@@ -24,7 +24,6 @@ class RotaryPositionalEmbedding(nn.Module):
             x: torch.Tensor, # (batch, seq_len, d_model)
             token_positions: torch.Tensor
     ) -> torch.Tensor:
-        B, S, D = x.shape
         sin = self.sin[token_positions]
         cos = self.cos[token_positions]
 
@@ -33,5 +32,5 @@ class RotaryPositionalEmbedding(nn.Module):
 
         x1_rot = x1 * cos - x2 * sin
         x2_rot = x1 * sin + x2 * cos
-        x_rot = torch.stack((x1_rot, x2_rot), dim=-1).reshape(B, S, D)
+        x_rot = torch.stack((x1_rot, x2_rot), dim=-1).reshape(x.shape)
         return x_rot
