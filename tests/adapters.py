@@ -119,7 +119,9 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
+    # raise NotImplementedError
+    from cs336_basics.scaled_dp_attn import scaled_dp_attn
+    return scaled_dp_attn(Q, K, V, mask)
 
 
 def run_multihead_self_attention(
@@ -142,7 +144,6 @@ def run_multihead_self_attention(
     Args:
         d_model (int): Dimensionality of the feedforward input and output.
         num_heads (int): Number of heads to use in multi-headed attention.
-        max_seq_len (int): Maximum sequence length to pre-cache if your implementation does that.
         q_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the Q projection
         k_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the K projection
         v_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the V projection
@@ -153,7 +154,18 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    # raise NotImplementedError
+    from cs336_basics.CausalMultiheadSelfAttention import CausalMultiheadSelfAttention
+    layer = CausalMultiheadSelfAttention(d_model=d_model, num_heads=num_heads)
+    state = {
+        "Q": q_proj_weight,
+        "K": k_proj_weight,
+        "V": v_proj_weight,
+        "O": o_proj_weight,
+    }
+    layer.load_state_dict(state)
+
+    return layer(in_features)
 
 
 def run_multihead_self_attention_with_rope(
@@ -193,7 +205,18 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    # raise NotImplementedError
+    from cs336_basics.CausalMultiheadSelfAttention import CausalMultiheadSelfAttention
+    layer = CausalMultiheadSelfAttention(d_model=d_model, num_heads=num_heads, theta=theta, max_seq_len=max_seq_len, token_positions=token_positions)
+    state = {
+        "Q": q_proj_weight,
+        "K": k_proj_weight,
+        "V": v_proj_weight,
+        "O": o_proj_weight,
+    }
+    layer.load_state_dict(state)
+
+    return layer(in_features)
 
 
 def run_rope(
@@ -291,7 +314,24 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    # raise NotImplementedError
+    from cs336_basics.TransformerBlock import TransformerBlock
+    *batch_shape, seq_len, _ = in_features.shape
+    device = in_features.device
+    # shape: (seq_len,)
+    base = torch.arange(seq_len, device=device)
+    # broadcast to batch dims
+    token_positions = base.expand(*batch_shape, seq_len)
+    layer = TransformerBlock(
+        d_model,
+        num_heads,
+        d_ff,
+        max_seq_len,
+        theta,
+        weights,
+        token_positions,
+    )
+    return layer(in_features)
 
 
 def run_transformer_lm(
@@ -453,7 +493,9 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
-    raise NotImplementedError
+    # raise NotImplementedError
+    from cs336_basics.softmax import softmax
+    return softmax(in_features, dim)
 
 
 def run_cross_entropy(
