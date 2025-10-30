@@ -413,7 +413,26 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    # raise NotImplementedError
+    *batch_shape, seq_len, _ = in_indices.shape
+    device = in_indices.device
+    # shape: (seq_len,)
+    base = torch.arange(seq_len, device=device)
+    # broadcast to batch dims
+    token_positions = base.expand(*batch_shape, seq_len)
+    from cs336_basics.TransformerLM import TransformerLM
+    model = TransformerLM(
+        vocab_size,
+        context_length,
+        num_layers,
+        d_model,
+        num_heads,
+        d_ff,
+        rope_theta,
+        weights,
+        token_positions,
+    )
+    return model(in_indices)
 
 
 def run_rmsnorm(

@@ -68,8 +68,14 @@ class CausalMultiheadSelfAttention(nn.Module):
         V = rearrange(x @ self.V.T, "b s (h d) -> b h s d", h=H, d=d_k)
 
         if self.rope is not None:
-            Q = self.rope(Q, self.token_positions)
-            K = self.rope(K, self.token_positions)
+            seq_len = Q.shape[-2]
+            if getattr(self, "token_positions", None) is not None and \
+            self.token_positions.shape[-1] == seq_len:
+                token_positions = self.token_positions
+            else:
+                token_positions = torch.arange(seq_len, device=Q.device)
+            Q = self.rope(Q, token_positions)
+            K = self.rope(K, token_positions)
 
         mask = ~torch.triu(torch.ones(S, S, dtype=torch.bool, device=x.device), diagonal=1)
         mask = repeat(mask, 's1 s2 -> b h s1 s2', b=B, h=H)
