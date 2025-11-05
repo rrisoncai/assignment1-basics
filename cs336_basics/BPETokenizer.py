@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import regex as re
 from typing import Iterable, Iterator
 
@@ -8,8 +9,9 @@ TOKEN_RE = re.compile(PAT)
 
 def pre_tokenization(
         text: str,
-        special_tokens: list[str]
-) -> list[tuple[bytes, ...]]:
+        special_tokens: list[str],
+        inv_vocab: dict[bytes, int]
+) -> list[int | None]:
     # Sort special tokens by length (desc) to prefer longest matches when overlapping
     if special_tokens:
         special_tokens_sorted = sorted(special_tokens, key=len, reverse=True)
@@ -20,39 +22,44 @@ def pre_tokenization(
         st_set = set()
         chunks = [text]
 
-    # Use a sentinel to prevent merges across piece boundaries (regex pieces and specials)
-    SENTINEL = None  # type: ignore[assignment]
+    SENTINEL = None  # boundary marker to prevent merges across regex/special chunks
 
-    tokens: list[object] = []  # elements are bytes or SENTINEL
+    tokens: list[int | None] = []
     for chunk in chunks:
-        # If this chunk is exactly a special token, keep it as a single bytes token
+        # keep special tokens intact as a single bytes token
         if st_set and chunk in st_set:
-            tokens.append(chunk.encode("utf-8"))
+            tokens.append(inv_vocab[chunk.encode("utf-8")])
             tokens.append(SENTINEL)
             continue
-        # Otherwise, run the GPT-2 style regex and break each match into single-byte tokens
+
+        # GPT-2 regex over the non-special chunk; then break each match into single bytes
         for m in TOKEN_RE.finditer(chunk):
-            w = m.group()
-            b = w.encode("utf-8")
-            for bt in b:
-                tokens.append(bytes([bt]))
-            # boundary between regex matches to avoid cross-piece merges
+            b = m.group().encode("utf-8")
+            # push each byte as a separate token so merges can build multi-byte tokens
+            tokens.extend(inv_vocab[bytes([bt])] for bt in b)
+            # boundary between regex matches
             tokens.append(SENTINEL)
 
-    # Drop trailing sentinel if present
+    # drop trailing sentinel
     if tokens and tokens[-1] is SENTINEL:
         tokens.pop()
 
-    # Filter out sentinels before returning (merges will see boundaries because equality can't cross None)
-    # We keep them during merging by leaving them in the list; the caller expects a list of bytes tokens.
-    # Therefore, return the list with sentinels included; the merge routine compares only bytes.
-    return tokens  # type: ignore[return-value]
+    return tokens
 
 class BPETokenizer:
     def __init__(self, vocab, merges, special_tokens=None):
         self.vocab = vocab
+        self._inv_vocab = {v: k for k, v in vocab.items()}
         self.merges = merges
         self.special_tokens = special_tokens
+
+        # Build pair_rank: (id_a, id_b) -> (rank, merged_id)
+        self.pair_rank: dict[tuple[int, int], tuple[int, int]] = {}
+        for r, (ba, bb) in enumerate(self.merges):
+            ia = self._inv_vocab[ba]
+            ib = self._inv_vocab[bb]
+            ic = self._inv_vocab[ba + bb]
+            self.pair_rank[(ia, ib)] = (r, ic)
 
     @classmethod
     def from_files(cls, vocab_filepath, merges_filepath, special_tokens=None):
@@ -75,29 +82,86 @@ class BPETokenizer:
         return cls(vocab, merges, special_tokens)
 
     def encode(self, text: str) -> list[int]:
-        """
-        Encode an input text into a sequence of token IDs.
-        """
-        tokens = pre_tokenization(text, self.special_tokens)
-        for first, second in self.merges:
-            i = 0
-            merged_tokens = []
-            while i < len(tokens):
-                if i < len(tokens) - 1 and tokens[i] == first and tokens[i+1] == second:
-                    merged_tokens.append(first + second)
-                    i += 2
-                else:
-                    merged_tokens.append(tokens[i])
-                    i += 1
-            tokens = merged_tokens
-        ids = []
-        for tok in tokens:
-            for k, v in self.vocab.items():
-                if v == tok:
-                    ids.append(k)
-                    break
+        # 1) integer pre-tokenization with sentinels
+        tokens = pre_tokenization(text, self.special_tokens, self._inv_vocab)
+
+        # 2) split by sentinel (None) into segments of int ids
+        ids: list[int] = []
+        seg: list[int] = []
+        for t in tokens + [None]:  # flush last segment by appending sentinel
+            if t is None:
+                if seg:
+                    ids.extend(self._encode_segment_ids(seg))
+                    seg = []
+            else:
+                seg.append(t)
         return ids
 
+    def _encode_segment_ids(self, base_ids: list[int]) -> list[int]:
+        import heapq
+        n = len(base_ids)
+        if n <= 1:
+            return base_ids[:]  # nothing to merge
+
+        ids = base_ids[:]  # mutable copy
+        prev = [-1] + list(range(0, n - 1))
+        next = list(range(1, n)) + [-1]
+        alive = [True] * n
+        version = [0] * n
+
+        heap: list[tuple[int, int, int]] = []  # (rank, i, ver)
+
+        def push_pair(i: int) -> None:
+            j = next[i]
+            if j == -1 or not alive[i] or not alive[j]:
+                return
+            key = (ids[i], ids[j])
+            pr = self.pair_rank.get(key)
+            if pr is None:
+                return
+            rank, _ = pr
+            heapq.heappush(heap, (rank, i, version[i]))
+
+        for i in range(0, n - 1):
+            push_pair(i)
+
+        while heap:
+            rank, i, ver = heapq.heappop(heap)
+            j = next[i]
+            if j == -1 or not alive[i] or not alive[j]:
+                continue
+            if version[i] != ver:
+                continue  # stale
+            pr = self.pair_rank.get((ids[i], ids[j]))
+            if pr is None:
+                continue
+            _, merged_id = pr
+
+            # merge j into i
+            ids[i] = merged_id
+            alive[j] = False
+            nj = next[j]
+            next[i] = nj
+            if nj != -1:
+                prev[nj] = i
+            version[i] += 1
+
+            li = prev[i]
+            if li != -1 and alive[li]:
+                version[li] += 1
+                push_pair(li)
+            if nj != -1 and alive[nj]:
+                version[i] += 1
+                push_pair(i)
+
+        # collect alive ids in order
+        out: list[int] = []
+        k = 0
+        while k != -1:
+            if alive[k]:
+                out.append(ids[k])
+            k = next[k]
+        return out
 
     def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
         """
@@ -106,24 +170,16 @@ class BPETokenizer:
         memory.
         """
         for chunk in iterable:
-            tokens = pre_tokenization(chunk, self.special_tokens)
-
-            for first, second in self.merges:
-                i = 0
-                merged_tokens = []
-                while i < len(tokens):
-                    if i < len(tokens) - 1 and tokens[i] == first and tokens[i+1] == second:
-                        merged_tokens.append(first + second)
-                        i += 2
-                    else:
-                        merged_tokens.append(tokens[i])
-                        i += 1
-                tokens = merged_tokens
-            for tok in tokens:
-                for k, v in self.vocab.items():
-                    if v == tok:
-                        yield k
-                        break
+            tokens = pre_tokenization(chunk, self.special_tokens, self._inv_vocab)
+            seg: list[int] = []
+            for t in tokens + [None]:
+                if t is None:
+                    if seg:
+                        for _id in self._encode_segment_ids(seg):
+                            yield _id
+                        seg = []
+                else:
+                    seg.append(t)
         
     def decode(self, ids: list[int]) -> str:
         """
@@ -134,18 +190,30 @@ class BPETokenizer:
         return byte_seq.decode("utf-8", errors="replace")
     
 if __name__ == "__main__":
-    text = """
-    The days are bright and filled with pain.
-    Enclose me in your gentle rain.
-    The time you ran was too insane.
-    We'll meet again, We'll meet again.
-    """
+    input_file = "../../data/TinyStoriesV2-GPT4-train.txt"
+    # input_file = "../../data/owt_valid.txt"
+    lines = []
+    with open(input_file, "r", encoding="utf-8") as f:
+        text = f.read()
+
     bpe = BPETokenizer.from_files(
         vocab_filepath="../../data/bpe_artifacts_TinyStoriesV2-GPT4-train/vocab.hex.json",
         merges_filepath="../../data/bpe_artifacts_TinyStoriesV2-GPT4-train/merges.hex.json",
+        # vocab_filepath="../../data/bpe_artifacts_owt_train/vocab.hex.json",
+        # merges_filepath="../../data/bpe_artifacts_owt_train/merges.hex.json",
         special_tokens=["<|endoftext|>"]
         )
+    tik = time.time()
     token_list = bpe.encode(text)
-    print("text length:", len(text))
+    tok = time.time()
+    elapsed = tok - tik
+    bytes_of_text = len(text.encode("utf-8"))
+    print(f"Thoughput is {bytes_of_text / elapsed / 1024:.2f} kB/sec")
+    print("text length:", bytes_of_text)
     print("token lenght:", len(token_list))
-    print(f"compression ratio: {len(text) / len(token_list):.2f}")
+    print(f"compression ratio: {bytes_of_text / len(token_list):.2f}")
+    import numpy as np
+    os.makedirs("../../data/token_ids", exist_ok=True)
+    out_path = os.path.join("../../data/token_ids", os.path.basename(input_file) + ".npy")
+    np.save(out_path, np.array(token_list, dtype=np.uint16))
+    print(f"Token ids saved to {out_path}")
