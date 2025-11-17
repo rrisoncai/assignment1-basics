@@ -8,6 +8,7 @@ def silu(
         x: torch.Tensor
 ) -> torch.Tensor:
     return x * torch.sigmoid(x)
+
 def softmax(
         x: torch.Tensor,
         dim: int
@@ -22,12 +23,8 @@ def cross_entropy_loss(
             x: torch.Tensor,
             y: torch.Tensor,
 ) -> torch.Tensor:
-    # print(f"input.shape={x.shape}, output.shape={y.shape}")
-    # print(f"x={x}")
-    # print(f"y={y}")
-    # print(f"x[:,y]={x[y]}")
+
     max_val = x.max(dim=-1, keepdim=True).values
-    # print(f"max_val={max_val}")
     x = x - max_val
     true_labels = x.gather(1, y.unsqueeze(1)).squeeze(1)
 

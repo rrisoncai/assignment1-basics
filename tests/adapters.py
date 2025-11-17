@@ -207,7 +207,7 @@ def run_multihead_self_attention_with_rope(
     """
     # raise NotImplementedError
     from cs336_basics.CausalMultiheadSelfAttention import CausalMultiheadSelfAttention
-    layer = CausalMultiheadSelfAttention(d_model=d_model, num_heads=num_heads, theta=theta, max_seq_len=max_seq_len, token_positions=token_positions)
+    layer = CausalMultiheadSelfAttention(d_model=d_model, num_heads=num_heads, theta=theta, max_seq_len=max_seq_len)
     state = {
         "Q": q_proj_weight,
         "K": k_proj_weight,
@@ -321,7 +321,6 @@ def run_transformer_block(
     # shape: (seq_len,)
     base = torch.arange(seq_len, device=device)
     # broadcast to batch dims
-    token_positions = base.expand(*batch_shape, seq_len)
     layer = TransformerBlock(
         d_model,
         num_heads,
@@ -329,7 +328,6 @@ def run_transformer_block(
         max_seq_len,
         theta,
         weights,
-        token_positions,
     )
     return layer(in_features)
 
@@ -414,12 +412,6 @@ def run_transformer_lm(
         next-word distribution for each token.
     """
     # raise NotImplementedError
-    *batch_shape, seq_len, _ = in_indices.shape
-    device = in_indices.device
-    # shape: (seq_len,)
-    base = torch.arange(seq_len, device=device)
-    # broadcast to batch dims
-    token_positions = base.expand(*batch_shape, seq_len)
     from cs336_basics.TransformerLM import TransformerLM
     model = TransformerLM(
         vocab_size,
@@ -430,7 +422,6 @@ def run_transformer_lm(
         d_ff,
         rope_theta,
         weights,
-        token_positions,
     )
     return model(in_indices)
 

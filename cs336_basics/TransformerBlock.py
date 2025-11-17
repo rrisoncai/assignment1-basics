@@ -13,7 +13,6 @@ class TransformerBlock(nn.Module):
             max_seq_len: int,
             theta: int,
             weights: dict[str, torch.Tensor],
-            token_positions: torch.Tensor,
     ):
         super().__init__()
         self.rmsnorm1 = rmsnorm(d_model=d_model)
@@ -28,7 +27,6 @@ class TransformerBlock(nn.Module):
             num_heads=num_heads,
             theta=theta,
             max_seq_len=max_seq_len,
-            token_positions=token_positions,
         )
         state = {
             "Q": weights["attn.q_proj.weight"],

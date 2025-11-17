@@ -32,7 +32,6 @@ class CausalMultiheadSelfAttention(nn.Module):
             num_heads: int,
             theta: int | None = None,
             max_seq_len: int | None = None,
-            token_positions: torch.Tensor | None = None,
         ):
         super().__init__()
         self.d_model = d_model
@@ -51,7 +50,6 @@ class CausalMultiheadSelfAttention(nn.Module):
         if theta is not None and max_seq_len is not None:
             from .RotaryPositionalEmbedding import RotaryPositionalEmbedding
             self.rope = RotaryPositionalEmbedding(theta=theta, d_k=self.d_k, max_seq_len=max_seq_len)
-            self.token_positions = token_positions
         else:
             self.rope = None
 
@@ -69,11 +67,7 @@ class CausalMultiheadSelfAttention(nn.Module):
 
         if self.rope is not None:
             seq_len = Q.shape[-2]
-            if getattr(self, "token_positions", None) is not None and \
-            self.token_positions.shape[-1] == seq_len:
-                token_positions = self.token_positions
-            else:
-                token_positions = torch.arange(seq_len, device=Q.device)
+            token_positions = torch.arange(seq_len, device=Q.device)
             Q = self.rope(Q, token_positions)
             K = self.rope(K, token_positions)
 

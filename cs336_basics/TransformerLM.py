@@ -22,7 +22,6 @@ class TransformerLM(nn.Module):
             d_ff: int,
             theta: int,
             weights: dict[str, torch.Tensor],
-            token_positions: torch.Tensor,
     ):
         super().__init__()
         self.embed = Embedding(vocab_size, d_model)
@@ -36,7 +35,6 @@ class TransformerLM(nn.Module):
                 context_length,
                 theta,
                 get_layer_weights(weights, i),
-                token_positions,
             )
             for i in range(num_layers)]
         )
