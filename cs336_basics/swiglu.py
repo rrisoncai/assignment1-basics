@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-
+from .util_funcs import silu
 class swiglu(nn.Module):
     def __init__(
             self,
@@ -16,17 +16,11 @@ class swiglu(nn.Module):
         nn.init.trunc_normal_(self.w2, mean=0.0, std=(1.0 / d_model ** 0.5))
         nn.init.trunc_normal_(self.w3, mean=0.0, std=(1.0 / d_model ** 0.5))
 
-    def silu(
-            self,
-            x: torch.Tensor
-    ) -> torch.Tensor:
-        return x * torch.sigmoid(x)
-        
     def forward(
             self,
             x: torch.Tensor
     ) -> torch.Tensor:
-        x1 = self.silu(x @ self.w1.T)
+        x1 = silu(x @ self.w1.T)
         x2 = x @ self.w3.T
         x3 = x1 * x2
         x4 = x3 @ self.w2.T
