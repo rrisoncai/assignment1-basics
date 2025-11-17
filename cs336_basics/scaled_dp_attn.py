@@ -1,5 +1,5 @@
 import torch
-from .softmax import softmax
+from .util_funcs import softmax
 from einops import einsum
 
 def scaled_dp_attn(

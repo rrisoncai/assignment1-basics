@@ -4,7 +4,7 @@ from .Embedding import Embedding
 from .TransformerBlock import TransformerBlock
 from .rmsnorm import rmsnorm
 from .Linear import Linear
-from .softmax import softmax
+from .util_funcs import softmax
 
 def get_layer_weights(weights: dict[str, torch.Tensor], layer_idx: int):
     prefix = f"layers.{layer_idx}."
