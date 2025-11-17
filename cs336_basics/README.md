@@ -22,3 +22,9 @@ The compression ratio drops.
 ### (d) Using your TinyStories and OpenWebText tokenizers, encode the respective training and development datasets into a sequence of integer token IDs. We’ll use this later to train our language model. We recommend serializing the token IDs as a NumPy array of datatype uint16. Why is uint16 an appropriate choice?
 
 Vocabulary is 10,000 and 32,000 which fit uint16 range [0, 65535], as uint8 is too small and uint32 is too large.
+
+
+### Problem (learning_rate_tuning): Tuning the learning rate (1 point)
+- When settting small learning rate, loss converge much slower
+- When setting large learning rate, loss may expload rather than converage.
+- Set appropriate learning rate is crucial for fast and stable training loop.
