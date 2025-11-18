@@ -62,7 +62,7 @@ def parse_args():
 
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--max_steps", type=int, default=10_000)
-    parser.add_argument("--log_interval", type=int, default=100)
+    parser.add_argument("--log_interval", type=int, default=10)
     parser.add_argument("--save_interval", type=int, default=1_000)
     parser.add_argument("--ckpt_path", type=str, default="ckpts/latest.pt")
 
@@ -122,6 +122,13 @@ def main():
     print(f"Hyperparameters: lr={args.lr}, batch_size={args.batch_size}, steps={args.max_steps}")
 
     for step in range(start_step, args.max_steps):
+        step_start = torch.cuda.Event(enable_timing=True) if device.type == 'cuda' else None
+        if step_start is None:
+            import time
+            cpu_t0 = time.time()
+        else:
+            step_start.record()
+
         try:
             x, y = next(train_iter)
         except StopIteration:
@@ -140,13 +147,23 @@ def main():
         loss.backward()
         optimizer.step()
 
+        if device.type == 'cuda':
+            step_end = torch.cuda.Event(enable_timing=True)
+            step_end.record()
+            torch.cuda.synchronize()
+            step_ms = step_start.elapsed_time(step_end)
+            print(f"[time] step {step+1}: {step_ms:.2f} ms")
+        else:
+            import time
+            step_ms = (time.time() - cpu_t0) * 1000
+            print(f"[time] step {step+1}: {step_ms:.2f} ms")
+
         if (step + 1) % args.log_interval == 0:
             val_loss = evaluate(model, val_loader, device)
             print(f"step {step + 1}: train loss = {loss.item():.4f}, val loss = {val_loss:.4f}")
 
         if (step + 1) % args.save_interval == 0:
             save_checkpoint(args.ckpt_path, model, optimizer, step + 1)
-
 
 if __name__ == "__main__":
     main()
