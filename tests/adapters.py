@@ -327,8 +327,24 @@ def run_transformer_block(
         d_ff,
         max_seq_len,
         theta,
-        weights,
     )
+    with torch.no_grad():
+        layer.rmsnorm1.load_state_dict({"weight": weights["ln1.weight"]})
+        layer.rmsnorm2.load_state_dict({"weight": weights["ln2.weight"]})
+        state = {
+            "Q": weights["attn.q_proj.weight"],
+            "K": weights["attn.k_proj.weight"],
+            "V": weights["attn.v_proj.weight"],
+            "O": weights["attn.output_proj.weight"],
+        }
+        layer.sdpa.load_state_dict(state)
+
+        state = {
+            "w1": weights["ffn.w1.weight"],
+            "w2": weights["ffn.w2.weight"],
+            "w3": weights["ffn.w3.weight"]
+        }
+        layer.ffn.load_state_dict(state)
     return layer(in_features)
 
 
@@ -421,10 +437,34 @@ def run_transformer_lm(
         num_heads,
         d_ff,
         rope_theta,
-        weights,
     )
-    return model(in_indices)
 
+    with torch.no_grad():
+        model.embed.load_state_dict({"W": weights["token_embeddings.weight"]})
+        model.norm.load_state_dict({"weight": weights["ln_final.weight"]})
+        model.linear.load_state_dict({"W": weights["lm_head.weight"]})
+
+        for i, block in enumerate(model.transformer_stack):
+            prefix = f"layers.{i}."
+            layer_w = {k.replace(prefix, ""): v for k, v in weights.items() if k.startswith(prefix)}
+            block.rmsnorm1.load_state_dict({"weight": layer_w["ln1.weight"]})
+            block.rmsnorm2.load_state_dict({"weight": layer_w["ln2.weight"]})
+            state = {
+                "Q": layer_w["attn.q_proj.weight"],
+                "K": layer_w["attn.k_proj.weight"],
+                "V": layer_w["attn.v_proj.weight"],
+                "O": layer_w["attn.output_proj.weight"],
+            }
+            block.sdpa.load_state_dict(state)
+
+            state = {
+                "w1": layer_w["ffn.w1.weight"],
+                "w2": layer_w["ffn.w2.weight"],
+                "w3": layer_w["ffn.w3.weight"]
+            }
+            block.ffn.load_state_dict(state)
+
+    return model(in_indices)
 
 def run_rmsnorm(
     d_model: int,
