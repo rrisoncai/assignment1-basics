@@ -250,7 +250,7 @@ class BPETrainer:
 
 # TEST CODE
 if __name__ == "__main__":
-    # bpe = BPETrainer(input_path="../../data/TinyStoriesV2-GPT4-valid", vocab_size=10000, special_tokens=["<|endoftext|>"])
+    # bpe = BPETrainer(input_path="../../data/TinyStoriesV2-GPT4-train.txt", vocab_size=10000, special_tokens=["<|endoftext|>"])
     bpe = BPETrainer(input_path="../../data/owt_train.txt", vocab_size=32000, special_tokens=None)
     vocab, merges = bpe.train()
     base_name = os.path.splitext(os.path.basename(bpe.input_path))[0]

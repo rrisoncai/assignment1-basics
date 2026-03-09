@@ -168,3 +168,7 @@ data/
 # Scalene
 profile.html
 profile.json
+
+# wandb
+wandb/
+ckpts/

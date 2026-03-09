@@ -19,20 +19,26 @@ def softmax(
     sum_exp_x = exp_x.sum(dim=dim, keepdim=True)
     return exp_x / sum_exp_x
 
+def softmax_with_temperature(
+    x: torch.Tensor,
+    temperature: float,
+    dim: int
+) -> torch.Tensor:
+    t = max(temperature, 1e-6)
+    return softmax(x / t, dim=dim)
+
 def cross_entropy_loss(
             x: torch.Tensor,
             y: torch.Tensor,
 ) -> torch.Tensor:
-
+    # Numerically-stable CE on logits with shape (..., vocab) and targets (...,).
+    y = y.long()
     max_val = x.max(dim=-1, keepdim=True).values
-    x = x - max_val
-    true_labels = x.gather(1, y.unsqueeze(1)).squeeze(1)
-
-    exp_x = torch.exp(x)
-    logsum_exp_x = torch.log(exp_x.sum(dim=-1, keepdim=True))
-    loss = logsum_exp_x - true_labels
-    loss = loss.mean()
-    return loss
+    shifted = x - max_val
+    logsumexp = torch.log(torch.exp(shifted).sum(dim=-1, keepdim=True))
+    log_probs = shifted - logsumexp
+    nll = -log_probs.gather(dim=-1, index=y.unsqueeze(-1)).squeeze(-1)
+    return nll.mean()
 
 def learning_rate_schedule(
     it: int,
@@ -126,7 +132,51 @@ def load_checkpoint(
         model: torch.nn.Module,
         optimizer: torch.optim.Optimizer,
 ) -> int:
-    obj = torch.load(src)
+    # Load checkpoints onto the model's current device so cross-device resumes
+    # (e.g., MPS-saved checkpoint resumed on CUDA/CPU) don't fail.
+    model_device = next(model.parameters()).device
+    obj = torch.load(src, map_location=model_device)
     model.load_state_dict(obj["model"])
     optimizer.load_state_dict(obj["optim"])
     return obj["iteration"]
+
+def nucleus_sampling(
+    probs: torch.Tensor,
+    prob_cutoff: float,
+) -> list[int]:
+    # Sort probabilities in descending order and keep original token indices.
+    sorted_probs, sorted_idx = torch.sort(probs, descending=True)
+    cdf = torch.cumsum(sorted_probs, dim=0)
+
+    # Keep tokens until cumulative probability reaches/exceeds cutoff.
+    cutoff_pos = torch.nonzero(cdf >= prob_cutoff, as_tuple=False)
+    k = int(cutoff_pos[0].item()) + 1 if cutoff_pos.numel() > 0 else sorted_idx.numel()
+
+    return sorted_idx[:k].tolist()
+
+def decode(
+    llm_output: torch.Tensor,
+    temperature: float,
+    prob_threshold: float,
+) -> int:
+    # Accept common logits shapes and always decode from the latest position.
+    if llm_output.ndim == 1:
+        logits = llm_output
+    elif llm_output.ndim == 2:
+        logits = llm_output[-1]
+    elif llm_output.ndim == 3:
+        logits = llm_output[0, -1]
+    else:
+        raise ValueError(f"Unsupported llm_output shape: {tuple(llm_output.shape)}")
+
+    p = min(max(prob_threshold, 0.0), 1.0)
+    probs = softmax_with_temperature(logits, temperature, dim=-1)
+
+    nucleus_ids = nucleus_sampling(probs, p)
+    nucleus_idx = torch.tensor(nucleus_ids, device=probs.device, dtype=torch.long)
+    nucleus_probs = probs[nucleus_idx]
+    nucleus_probs = nucleus_probs / nucleus_probs.sum()
+
+    sampled_local_idx = torch.multinomial(nucleus_probs, num_samples=1).item()
+    token_id = int(nucleus_idx[sampled_local_idx].item())
+    return token_id
