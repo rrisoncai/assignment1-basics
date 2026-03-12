@@ -1,110 +1,114 @@
+import json
 import logging
 import os
-import json
-from typing import BinaryIO
-from concurrent.futures import ProcessPoolExecutor
-from collections import Counter
-import regex as re
 import time
+from collections import Counter, defaultdict
+from typing import BinaryIO
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='[%(levelname)s] %(message)s',
-    force=False)
+import regex as re
+
+logging.basicConfig(level=logging.DEBUG, format='[%(levelname)s] %(message)s', force=False)
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 TOKEN_RE = re.compile(PAT)
 
-def pre_tokenization_impl(
-        text: str,
-        special_tokens: list[str]
-) -> dict[tuple[bytes, ...], int]:
-    if special_tokens:
-        pattern = "|".join(map(re.escape, special_tokens))
-        chunks = re.split(pattern, text)
-    else:
-        chunks = [text]
 
-    word_count: dict[str, int] = {}
-    for chunk in chunks:
-        for m in TOKEN_RE.finditer(chunk):
-            w = m.group()
-            word_count[w] = word_count.get(w, 0) + 1
+def _split_text(text: str, special_tokens: list[str]) -> list[str]:
+    if not special_tokens:
+        return [text]
+    # Sort by descending length to preserve the longest overlapping special token.
+    pattern = "|".join(re.escape(tok) for tok in sorted(special_tokens, key=len, reverse=True))
+    return re.split(pattern, text)
 
-    byte_tuple_count: dict[tuple[bytes, ...], int] = {}
-    for word, count in word_count.items():
-        b = word.encode("utf-8")
-        tup = tuple(bytes([bt]) for bt in b)
-        byte_tuple_count[tup] = byte_tuple_count.get(tup, 0) + count
-    return byte_tuple_count
 
-def _count_chunk_worker(
-    args: tuple[str, int, int, list[str]]
-) -> dict[tuple[bytes, ...], int]:
-    input_path, start, end, special_tokens = args
-    with open(input_path, "rb") as f:
-        f.seek(start)
-        chunk = f.read(end - start).decode("utf-8", errors="ignore")
-        return pre_tokenization_impl(chunk, special_tokens)
+def pre_tokenization_impl(text: str, special_tokens: list[str]) -> Counter[tuple[int, ...]]:
+    words: Counter[str] = Counter()
+    for chunk in _split_text(text, special_tokens):
+        for match in TOKEN_RE.finditer(chunk):
+            words[match.group()] += 1
+
+    tokenized_words: Counter[tuple[int, ...]] = Counter()
+    for word, count in words.items():
+        tokenized_words[tuple(word.encode("utf-8"))] += count
+    return tokenized_words
+
 
 def find_chunk_boundaries(
     file: BinaryIO,
     desired_num_chunks: int,
     split_special_token: bytes,
 ) -> list[int]:
-    """
-    Chunk the file into parts that can be counted independently.
-    May return fewer chunks if the boundaries end up overlapping.
-    """
     assert isinstance(split_special_token, bytes), "Must represent special token as a bytestring"
 
-    # Get total file size in bytes
     file.seek(0, os.SEEK_END)
     file_size = file.tell()
     file.seek(0)
 
-    chunk_size = file_size // desired_num_chunks
+    if desired_num_chunks <= 1 or file_size == 0:
+        return [0, file_size]
 
-    # Initial guesses for chunk boundary locations, uniformly spaced
-    # Chunks start on previous index, don't include last index
+    chunk_size = max(file_size // desired_num_chunks, 1)
     chunk_boundaries = [i * chunk_size for i in range(desired_num_chunks + 1)]
     chunk_boundaries[-1] = file_size
 
-    mini_chunk_size = 4096  # Read ahead by 4k bytes at a time
+    if not split_special_token:
+        return sorted(set(chunk_boundaries))
 
+    mini_chunk_size = 4096
     for bi in range(1, len(chunk_boundaries) - 1):
         initial_position = chunk_boundaries[bi]
-        file.seek(initial_position)  # Start at boundary guess
+        file.seek(initial_position)
         while True:
-            mini_chunk = file.read(mini_chunk_size)  # Read a mini chunk
-
-            # If EOF, this boundary should be at the end of the file
+            mini_chunk = file.read(mini_chunk_size)
             if mini_chunk == b"":
                 chunk_boundaries[bi] = file_size
                 break
-
-            # Find the special token in the mini chunk
             found_at = mini_chunk.find(split_special_token)
             if found_at != -1:
                 chunk_boundaries[bi] = initial_position + found_at
                 break
             initial_position += mini_chunk_size
 
-    # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
     return sorted(set(chunk_boundaries))
+
+
+def _pair_counter(word: tuple[int, ...]) -> Counter[tuple[int, int]]:
+    return Counter(zip(word, word[1:]))
+
+
+def _merge_pair_in_word(word: tuple[int, ...], pair: tuple[int, int], new_token_id: int) -> tuple[int, ...]:
+    first, second = pair
+    merged: list[int] = []
+    i = 0
+    changed = False
+    word_len = len(word)
+    while i < word_len:
+        if i + 1 < word_len and word[i] == first and word[i + 1] == second:
+            merged.append(new_token_id)
+            i += 2
+            changed = True
+        else:
+            merged.append(word[i])
+            i += 1
+    return tuple(merged) if changed else word
+
 
 class BPETrainer:
     def __init__(self, input_path, vocab_size, special_tokens):
         self.input_path = input_path
         self.vocab_size = vocab_size
         self.special_tokens = special_tokens or []
-        self.vocab = {}
-        self.merges = []
+        self.vocab: dict[int, bytes] = {}
+        self.merges: list[tuple[bytes, bytes]] = []
         self.next_id = 0
-        logging.debug(f"Init BPE Tokenizer with "
-                      f"Input Path={self.input_path}\n"
-                      f"Vocab Size={self.vocab_size}\n"
-                      f"special Tokens={special_tokens}\n")
+
+        logging.debug(
+            f"Init BPE Tokenizer with "
+            f"Input Path={self.input_path}\n"
+            f"Vocab Size={self.vocab_size}\n"
+            f"special Tokens={special_tokens}\n"
+        )
+
         for b in range(256):
             self.vocab[self.next_id] = bytes([b])
             self.next_id += 1
@@ -113,113 +117,109 @@ class BPETrainer:
             self.vocab[self.next_id] = tok.encode("utf-8")
             self.next_id += 1
 
-    def train(
-            self,
-    ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
+    def _count_words(self) -> Counter[tuple[int, ...]]:
+        file_size = os.path.getsize(self.input_path)
+        num_chunks = min(4, max(1, file_size // (8 * 1024 * 1024) + 1))
+        split_token = self.special_tokens[0].encode("utf-8") if self.special_tokens else b""
+
         with open(self.input_path, "rb") as f:
-            num_processes = 4
-            boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
+            boundaries = find_chunk_boundaries(f, num_chunks, split_token)
+            global_counts: Counter[tuple[int, ...]] = Counter()
+            for start, end in zip(boundaries[:-1], boundaries[1:]):
+                if start == end:
+                    continue
+                f.seek(start)
+                chunk = f.read(end - start).decode("utf-8", errors="ignore")
+                global_counts.update(pre_tokenization_impl(chunk, self.special_tokens))
+        return global_counts
 
-            tasks = [
-                (self.input_path, start, end, self.special_tokens)
-                for start, end, in zip(boundaries[:-1], boundaries[1:])
-            ]
-            global_counts: dict[tuple[bytes, ...], int] = {}
-            with ProcessPoolExecutor(max_workers=num_processes) as ex:
-                for local_counts in ex.map(_count_chunk_worker, tasks):
-                    for k, v in local_counts.items():
-                        global_counts[k] = global_counts.get(k, 0) + v
-            # my PC encounters OOM error, dump byte count to file
-            # import pickle
-            # with open("global_counts.pkl", "wb") as f:
-            #     pickle.dump(global_counts, f)
-            #     print("saved global counts")
-            return self.merge(global_counts)
-    
-    def merge(
-            self,
-            byte_count: dict[tuple[bytes, ...], int]
-    ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
+    def train(self) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
+        tokenized_words = self._count_words()
+        return self.merge(tokenized_words)
+
+    def merge(self, word_counts: Counter[tuple[int, ...]]) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
         start_next_id = self.next_id
-        _t0 = time.time()
-        _t_last = _t0
+        t0 = time.time()
+        t_last = t0
 
-        bp_count = {}
-        for tup, count in byte_count.items():
-            pairs = [(tup[i], tup[i+1]) for i in range(len(tup)-1)]
+        words = list(word_counts.keys())
+        counts = [word_counts[word] for word in words]
+        pair_counts: dict[tuple[int, int], int] = defaultdict(int)
+        pair_to_word_ids: dict[tuple[int, int], set[int]] = defaultdict(set)
 
-            for p in pairs:
-                bp_count[p] = bp_count.get(p, 0) + count
+        for word_id, word in enumerate(words):
+            if len(word) < 2:
+                continue
+            for pair, occurrences in _pair_counter(word).items():
+                pair_counts[pair] += occurrences * counts[word_id]
+                pair_to_word_ids[pair].add(word_id)
 
-        # Merge
         while self.next_id < self.vocab_size:
+            if not pair_counts:
+                break
+            best_pair = max(
+                pair_counts.items(),
+                key=lambda item: (item[1], (self.vocab[item[0][0]], self.vocab[item[0][1]])),
+            )[0]
 
-            most_common_pair, most_common_count = max(bp_count.items(), key=lambda x:(x[1],x[0]))
-
-            first, second = most_common_pair
-            merged_byte = first + second
-            self.merges.append(most_common_pair)
-            self.vocab[self.next_id] = merged_byte
+            first, second = best_pair
+            merged_bytes = self.vocab[first] + self.vocab[second]
+            new_token_id = self.next_id
+            self.vocab[new_token_id] = merged_bytes
+            self.merges.append((self.vocab[first], self.vocab[second]))
             self.next_id += 1
 
-            _added = self.next_id - start_next_id
-            if _added % 100 == 0:
-                _now = time.time()
-                logging.info(
-                    f"added {_added} new tokens in {_now - _t_last:.2f}s (total {_now - _t0:.2f}s); nex_id={self.next_id}"
-                )
-                _t_last = _now
+            affected_word_ids = list(pair_to_word_ids.pop(best_pair, ()))
+            pair_counts.pop(best_pair, None)
 
-            merged_tuple_count = {}
-            for tup, count in byte_count.items():
-                new_tuple = []
-                i = 0
-                while i < len(tup):
-                    if i < len(tup) - 1 and tup[i] == first and tup[i + 1] == second:
-                        new_tuple.append(merged_byte)
-                        i += 2
+            for word_id in affected_word_ids:
+                old_word = words[word_id]
+                new_word = _merge_pair_in_word(old_word, best_pair, new_token_id)
+                if new_word == old_word:
+                    continue
+
+                word_count = counts[word_id]
+                old_pairs = _pair_counter(old_word)
+                new_pairs = _pair_counter(new_word)
+
+                for old_pair, occurrences in old_pairs.items():
+                    new_total = pair_counts.get(old_pair, 0) - occurrences * word_count
+                    if new_total > 0:
+                        pair_counts[old_pair] = new_total
                     else:
-                        new_tuple.append(tup[i])
-                        i += 1
-                new_tuple = tuple(new_tuple)
-                merged_tuple_count[new_tuple] = merged_tuple_count.get(new_tuple, 0) + count
-                if new_tuple != tup:
-                    new_pairs = [(new_tuple[i], new_tuple[i+1]) for i in range(len(new_tuple)-1)]
-                    for p in new_pairs:
-                        bp_count[p] = bp_count.get(p, 0) + count
-                    
-                    old_pairs = [(tup[i], tup[i+1]) for i in range(len(tup)-1)]
-                    for p in old_pairs:
-                        bp_count[p] = bp_count.get(p, 0) - count
-                        if (bp_count[p] <= 0):
-                            bp_count.pop(p, None)
+                        pair_counts.pop(old_pair, None)
+                    word_ids = pair_to_word_ids.get(old_pair)
+                    if word_ids is not None:
+                        word_ids.discard(word_id)
+                        if not word_ids:
+                            pair_to_word_ids.pop(old_pair, None)
 
+                for new_pair, occurrences in new_pairs.items():
+                    pair_counts[new_pair] = pair_counts.get(new_pair, 0) + occurrences * word_count
+                    pair_to_word_ids[new_pair].add(word_id)
 
-            byte_count = merged_tuple_count
-        
-        _now_total = time.time()
+                words[word_id] = new_word
+
+            added = self.next_id - start_next_id
+            if added % 100 == 0:
+                now = time.time()
+                logging.info(
+                    f"added {added} new tokens in {now - t_last:.2f}s (total {now - t0:.2f}s); next_id={self.next_id}"
+                )
+                t_last = now
+
+        now_total = time.time()
         logging.info(
-            f"merge complete: added {self.next_id - start_next_id} new tokens in {_now_total - _t0:.2f}s"
+            f"merge complete: added {self.next_id - start_next_id} new tokens in {now_total - t0:.2f}s"
         )
-        
         return self.vocab, self.merges
-    def save_artifacts(
-            self,
-            output_dir: str
-    ) -> None:
-        """
-        Serialize the learnt vocabulary and merges to disk for inspection.
-        Files written:
-        - vocab.hex.json: {"<id>": "<hex-bytes>"}
-        - merges.hex.json: [["<hex-first", "<hex-second>"], ...] in merge order
-        - vocab.tsv: tab-separated human readable view (id, utf8-preview, hex)
-        - merges.txt: human readable merges, one per line in order
-        """
+
+    def save_artifacts(self, output_dir: str) -> None:
         os.makedirs(output_dir, exist_ok=True)
         vocab_serialized = {str(i): self.vocab[i].hex() for i in sorted(self.vocab.keys())}
         with open(os.path.join(output_dir, "vocab.hex.json"), "w", encoding="utf-8") as f:
             json.dump(vocab_serialized, f, ensure_ascii=False, indent=2)
-        
+
         merges_serialized = [[a.hex(), b.hex()] for (a, b) in self.merges]
         with open(os.path.join(output_dir, "merges.hex.json"), "w", encoding="utf-8") as f:
             json.dump(merges_serialized, f, ensure_ascii=False, indent=2)
@@ -227,31 +227,34 @@ class BPETrainer:
         with open(os.path.join(output_dir, "vocab.tsv"), "w", encoding="utf-8") as f:
             f.write("id\tutf8\thex\n")
             for i in sorted(self.vocab.keys()):
-                b = self.vocab[i]
+                token_bytes = self.vocab[i]
                 try:
-                    text = b.decode("utf-8")
+                    text = token_bytes.decode("utf-8")
                 except UnicodeDecodeError:
-                    text = b.decode("utf-8", errors="replace")
-                f.write(f"{i}\t{text}\t{b.hex()}\n")
+                    text = token_bytes.decode("utf-8", errors="replace")
+                f.write(f"{i}\t{text}\t{token_bytes.hex()}\n")
 
         with open(os.path.join(output_dir, "merges.txt"), "w", encoding="utf-8") as f:
-            for a, b in self.merges:
+            for first, second in self.merges:
                 try:
-                    a_txt = a.decode("utf-8")
+                    first_text = first.decode("utf-8")
                 except UnicodeDecodeError:
-                    a_txt = a.decode("utf-8", errors="replace")
+                    first_text = first.decode("utf-8", errors="replace")
 
                 try:
-                    b_txt = b.decode("utf-8")
+                    second_text = second.decode("utf-8")
                 except UnicodeDecodeError:
-                    b_txt = b.decode("utf-8", errors="replace")
-                
-                f.write(f"{a.hex()} ({a_txt}) + {b.hex()} ({b_txt})\n")
+                    second_text = second.decode("utf-8", errors="replace")
 
-# TEST CODE
+                f.write(f"{first.hex()} ({first_text}) + {second.hex()} ({second_text})\n")
+
+
 if __name__ == "__main__":
-    # bpe = BPETrainer(input_path="../../data/TinyStoriesV2-GPT4-train.txt", vocab_size=10000, special_tokens=["<|endoftext|>"])
-    bpe = BPETrainer(input_path="../../data/owt_train.txt", vocab_size=32000, special_tokens=None)
+    bpe = BPETrainer(
+        input_path="../../data/owt_train.txt",
+        vocab_size=32000,
+        special_tokens=["<|endoftext|>"],
+    )
     vocab, merges = bpe.train()
     base_name = os.path.splitext(os.path.basename(bpe.input_path))[0]
     out_dir = os.path.join(os.path.dirname(bpe.input_path), f"bpe_artifacts_{base_name}")

@@ -13,8 +13,9 @@ class Embedding(nn.Module):
         kwargs = {"device": device, "dtype": dtype}
         self.vocab_size = num_embeddings
         self.d_model = embedding_dim
+        delta = 1.0 / (self.d_model**0.5)
         self.W = nn.Parameter(torch.empty(self.vocab_size, self.d_model, **kwargs))
-        nn.init.trunc_normal_(self.W, mean=0.0, std=1.0, a=-3, b=3)
+        nn.init.trunc_normal_(self.W, mean=0.0, std=delta, a=-3 * delta, b=3 * delta)
 
 
     def forward(

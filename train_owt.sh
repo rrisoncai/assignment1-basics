@@ -1,0 +1,24 @@
+uv run python training_together.py \
+  --train_path /home/xiaodong/ws/cs336/data/token_ids/owt_train.txt.npy \
+  --val_path /home/xiaodong/ws/cs336/data/token_ids/owt_valid.txt.npy \
+  --vocab_size 32000 \
+  --context_length 512 \
+  --d_model 768 \
+  --d_ff 2048 \
+  --theta 10000 \
+  --num_layers 8 \
+  --num_heads 12 \
+  --batch_size 16 \
+  --grad_accum_steps 8 \
+  --precision bf16 \
+  --max_steps 20000 \
+  --save_interval 2000 \
+  --use_wandb \
+  --wandb_run_name train_owt_trial_5 \
+  --lr 2e-3 \
+  --min_lr 2e-4 \
+  --weight_decay 0.1 \
+  --warmup_iters 1000 \
+  --max_grad_norm 1.0 \
+  --early_stop_patience 30 \
+  --early_stop_min_delta 0.002

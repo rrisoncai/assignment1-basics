@@ -16,7 +16,7 @@ class Linear(nn.Module):
         self.W = nn.Parameter(torch.empty(out_features, in_features, **kwargs))
 
         delta = np.sqrt(2.0 / (in_features + out_features))
-        nn.init.trunc_normal_(self.W, mean=0.0, std=delta * delta, a=-3 * delta, b=3 * delta)
+        nn.init.trunc_normal_(self.W, mean=0.0, std=delta, a=-3 * delta, b=3 * delta)
 
     def forward(
             self,

@@ -1,0 +1,19 @@
+uv run python training_together.py \
+  --train_path /home/xiaodong/ws/cs336/data/token_ids/TinyStoriesV2-GPT4-train.txt.npy \
+  --val_path /home/xiaodong/ws/cs336/data/token_ids/TinyStoriesV2-GPT4-valid.txt.npy \
+  --vocab_size 10000 \
+  --context_length 256 \
+  --d_model 512 \
+  --d_ff 1344 \
+  --theta 10000 \
+  --num_layers 4 \
+  --num_heads 16 \
+  --batch_size 64 \
+  --precision bf16 \
+  --max_steps 20000 \
+  --use_wandb \
+  --wandb_run_name train_ts_test \
+  --lr 2e-3 \
+  --min_lr 2e-4 \
+  --warmup_iters 1000 \
+  --max_grad_norm 1.0

@@ -16,6 +16,7 @@ class TransformerLM(nn.Module):
             num_heads: int,
             d_ff: int,
             theta: int,
+            weight_tying: bool = False,
             weights: dict[str, torch.Tensor] | None = None,
     ):
         super().__init__()
@@ -34,6 +35,10 @@ class TransformerLM(nn.Module):
 
         self.norm = rmsnorm(d_model)
         self.linear = Linear(d_model, vocab_size)
+        if weight_tying:
+            # Tie output projection to token embedding weights:
+            # logits = h @ W_embed^T
+            self.linear.W = self.embed.W
 
     def forward(
             self,

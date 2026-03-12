@@ -13,11 +13,14 @@ def softmax(
         x: torch.Tensor,
         dim: int
 ) -> torch.Tensor:
+    in_type = x.dtype
+    x = x.float()
     max_val = x.max(dim=dim, keepdim=True).values
     x = x - max_val
     exp_x = torch.exp(x)
     sum_exp_x = exp_x.sum(dim=dim, keepdim=True)
-    return exp_x / sum_exp_x
+    out = exp_x / sum_exp_x
+    return out.to(in_type)
 
 def softmax_with_temperature(
     x: torch.Tensor,
@@ -33,6 +36,7 @@ def cross_entropy_loss(
 ) -> torch.Tensor:
     # Numerically-stable CE on logits with shape (..., vocab) and targets (...,).
     y = y.long()
+    x = x.float()
     max_val = x.max(dim=-1, keepdim=True).values
     shifted = x - max_val
     logsumexp = torch.log(torch.exp(shifted).sum(dim=-1, keepdim=True))

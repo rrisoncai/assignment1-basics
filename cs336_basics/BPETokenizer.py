@@ -241,7 +241,7 @@ def find_chunk_boundaries(
 
 if __name__ == "__main__":
     # input_file = "../../data/TinyStoriesV2-GPT4-train.txt"
-    input_file = "../../data/owt_train.txt"
+    input_file = "../../data/owt_valid.txt"
     lines = []
 
 
@@ -250,8 +250,9 @@ if __name__ == "__main__":
         # merges_filepath="../../data/bpe_artifacts_TinyStoriesV2-GPT4-train/merges.hex.json",
         vocab_filepath="../../data/bpe_artifacts_owt_train/vocab.hex.json",
         merges_filepath="../../data/bpe_artifacts_owt_train/merges.hex.json",
-        # special_tokens=["<|endoftext|>"]
+        special_tokens=["<|endoftext|>"]
         )
+
     token_list = []
     with open(input_file, "rb") as f:
         num_processes = 16
