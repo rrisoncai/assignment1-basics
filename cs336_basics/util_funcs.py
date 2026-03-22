@@ -121,6 +121,11 @@ def save_checkpoint(
         iteration: int,
         out: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
 ):
+    if isinstance(out, (str, os.PathLike)):
+        out_dir = os.path.dirname(os.fspath(out))
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+
     model_params = model.state_dict()
     optim_params = optimizer.state_dict()
     
